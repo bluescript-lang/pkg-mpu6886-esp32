@@ -1,0 +1,214 @@
+import { I2CMasterBus, I2CDevice, I2CResult } from 'i2c';
+
+// Constants
+const I2C_ADDRESS = 0x68;
+const I2C_FREQ = 400000;
+const I2C_TIMEOUT = 10;
+const INT16_RANGE = 0x8000;
+
+// Resisters
+const SMPLRT_DIV_REG    = 0x19;
+const CONFIG_REG        = 0x1A;
+const GYRO_CONFIG_REG   = 0x1B;
+const ACCEL_CONFIG_REG  = 0x1C;
+const ACCEL_CONFIG2_REG = 0x1D;
+const FIFO_ENABLE_REG   = 0x23;
+const INT_PIN_CFG_REG   = 0x37;
+const INT_ENABLE_REG    = 0x38;
+const ACCEL_XOUT_H_REG  = 0x3B;
+const TEMP_OUT_H_REG    = 0x41;
+const GYRO_XOUT_H_REG   = 0x43;
+const USER_CTRL_REG     = 0x6A;
+const PWR_MGMT_1_REG    = 0x6B;
+const WHO_AM_I_REG      = 0x75;
+const GYRO_OFFSET_REG   = 0x13;
+
+
+export enum GyroRange {
+    Dps250  = 0,
+    Dps500  = 1,
+    Dps1000 = 2,
+    Dps2000 = 3
+}
+
+export enum AccelRange {
+    G2  = 0,
+    G4  = 1,
+    G8  = 2,
+    G16 = 3
+}
+
+export class Vector3D {
+    x: float;
+    y: float;
+    z: float;
+    constructor(x: float, y: float, z: float) {
+        this.x = x;
+        this.y = y;
+        this.z = z;
+    }
+}
+
+
+// Helper functions
+
+function toInt16(high: integer, low: integer): integer {
+    let val = (high << 8) | low;
+    if (val >= 32768) {
+        val -= 65536;
+    }
+    return val;
+}
+
+function gyroRangeToResolution(range: GyroRange): float {
+    if (range === GyroRange.Dps250) {
+       return 250.0 / INT16_RANGE;
+    } else if (range === GyroRange.Dps500) {
+        return 500.0 / INT16_RANGE;
+    } else if (range === GyroRange.Dps1000) {
+        return 1000.0 / INT16_RANGE;
+    } else if (range === GyroRange.Dps2000) {
+        return 2000.0 / INT16_RANGE;
+    } else {
+        code`runtime_error("** mpu6886 module error: unknown gyro range.");`
+        // Not reachable
+        return 0.0;
+    }
+}
+
+function accelRangeToReslution(range: AccelRange): float {
+    if (range === AccelRange.G2) {
+        return 2.0 / INT16_RANGE;
+    } else if (range === AccelRange.G4) {
+        return 4.0 / INT16_RANGE;
+    } else if (range === AccelRange.G8) {
+        return 8.0 / INT16_RANGE;
+    } else if (range === AccelRange.G16) {
+        return 16.0 / INT16_RANGE;
+    } else {
+        code`runtime_error("** mpu6886 module error: unknown accel range.");`
+        // Not reachable
+        return 0.0;
+    }
+}
+
+export class MPU6886 {
+    device: I2CDevice;
+    
+    currentGyroRange: GyroRange;
+    currentAccelRange: AccelRange;
+    gyroResolution: float;
+    accelResolution: float;
+
+    constructor(bus: I2CMasterBus) {
+        this.device = new I2CDevice(bus, I2C_ADDRESS, I2C_FREQ, I2C_TIMEOUT);
+        this.currentGyroRange = GyroRange.Dps2000;
+        this.currentAccelRange = AccelRange.G8;
+        this.gyroResolution = gyroRangeToResolution(GyroRange.Dps2000);
+        this.accelResolution = accelRangeToReslution(AccelRange.G8);
+    }
+
+    setGyroRange(range: GyroRange): boolean {
+        const regValue = range << 3;
+        this.device.writeRegisterByte(GYRO_CONFIG_REG, regValue);
+        time.delay(10);
+        this.currentGyroRange = range;
+        this.gyroResolution = gyroRangeToResolution(range);
+        return this.device.lastOperationResult === I2CResult.OK;
+    }
+
+    setAccelRange(range: AccelRange): boolean {
+        const regValue = range << 3;
+        this.device.writeRegisterByte(ACCEL_CONFIG_REG, regValue);
+        time.delay(10);
+        this.currentAccelRange = range;
+        this.accelResolution = accelRangeToReslution(range);
+        return this.device.lastOperationResult === I2CResult.OK;
+    }
+
+    init(): boolean {
+        const whoAmI = this.device.readRegister(WHO_AM_I_REG, 1);
+        time.delay(10);
+        if (this.device.lastOperationResult !== I2CResult.OK || whoAmI[0] !== 0x19) return false;
+
+        // Power management
+        this.device.writeRegisterByte(PWR_MGMT_1_REG, 0x00);
+        time.delay(10);
+        this.device.writeRegisterByte(PWR_MGMT_1_REG, 0x80);
+        time.delay(10);
+        this.device.writeRegisterByte(PWR_MGMT_1_REG, 0x01);
+        time.delay(10);
+
+        this.device.writeRegisterByte(ACCEL_CONFIG_REG, 0x10);
+        time.delay(1);
+        this.device.writeRegisterByte(GYRO_CONFIG_REG, 0x18);
+        time.delay(1);
+        this.device.writeRegisterByte(CONFIG_REG, 0x01);
+        time.delay(1);
+        this.device.writeRegisterByte(SMPLRT_DIV_REG, 0x01);
+        time.delay(1);
+        this.device.writeRegisterByte(INT_ENABLE_REG, 0x00);
+        time.delay(1);
+        this.device.writeRegisterByte(ACCEL_CONFIG2_REG, 0x00);
+        time.delay(1);
+        this.device.writeRegisterByte(USER_CTRL_REG, 0x00);
+        time.delay(1);
+        this.device.writeRegisterByte(FIFO_ENABLE_REG, 0x00);
+        time.delay(1);
+        this.device.writeRegisterByte(INT_PIN_CFG_REG, 0x22);
+        time.delay(1);
+        this.device.writeRegisterByte(INT_ENABLE_REG, 0x01);
+        time.delay(10);
+        
+        return this.setGyroRange(this.currentGyroRange) && this.setAccelRange(this.currentAccelRange);
+    }
+
+    deinit() {
+        this.device.writeRegisterByte(PWR_MGMT_1_REG, 0x40);
+        time.delay(10);
+        this.device.close();
+    }
+
+    getAcceleration(): Vector3D | null {
+        const buf = this.device.readRegister(ACCEL_XOUT_H_REG, 6);
+        if (this.device.lastOperationResult !== I2CResult.OK) return null;
+
+        const ax = toInt16(buf[0], buf[1]);
+        const ay = toInt16(buf[2], buf[3]);
+        const az = toInt16(buf[4], buf[5]);
+
+        return new Vector3D(ax * this.accelResolution, ay * this.accelResolution, az * this.accelResolution);
+    }
+
+    getGyroscope(): Vector3D | null {
+        const buf = this.device.readRegister(GYRO_XOUT_H_REG, 6);
+        if (this.device.lastOperationResult !== I2CResult.OK) return null;
+
+        const gx = toInt16(buf[0], buf[1]);
+        const gy = toInt16(buf[2], buf[3]);
+        const gz = toInt16(buf[4], buf[5]);
+
+        return new Vector3D(gx * this.gyroResolution, gy * this.gyroResolution, gz * this.gyroResolution);
+    }
+
+    getTemperature(): float {
+        const buf = this.device.readRegister(TEMP_OUT_H_REG, 2);
+        if (this.device.lastOperationResult !== I2CResult.OK) return -1.0;
+
+        const temp = toInt16(buf[0], buf[1]);
+        return (temp / 326.8) + 25.0;
+    }
+
+    setGyroOffset(x: integer, y: integer, z: integer): boolean {
+        const buf = new Uint8Array(7, 0);
+        buf[0] = GYRO_OFFSET_REG;
+        buf[1] = x >> 8;
+        buf[2] = x & 0xFF;
+        buf[3] = y >> 8;
+        buf[4] = y & 0xFF;
+        buf[5] = z >> 8;
+        buf[6] = z & 0xFF;
+        this.device.write(buf);
+        return this.device.lastOperationResult === I2CResult.OK;
+    }
+}

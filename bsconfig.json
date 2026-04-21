@@ -1,0 +1,11 @@
+{
+  "projectName": "mpu6886",
+  "version": "1.0.0",
+  "vmVersion": "2.0.1",
+  "deviceName": "BLUESCRIPT",
+  "dependencies": {
+    "i2c": "https://github.com/bluescript-lang/pkg-i2c-esp32.git"
+  },
+  "boardName": "esp32",
+  "espIdfComponents": []
+}

@@ -1,0 +1,22 @@
+import { MPU6886 } from "./mpu6886";
+import { I2CMasterBus, I2CPort } from 'i2c';
+
+
+const bus = new I2CMasterBus(I2CPort.Auto, 21, 22);
+const imu = new MPU6886(bus);
+const success = imu.init();
+if (!success) {
+    console.log("Failed to init");
+}
+
+for (let i = 0; i < 10; i++) {
+    const temp = imu.getTemperature();
+    if (temp > 0.0) {
+        console.log(temp)
+    }
+    time.delay(1000)
+}
+
+imu.deinit();
+bus.close();
+
